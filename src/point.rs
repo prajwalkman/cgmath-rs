@@ -19,19 +19,19 @@
 
 use std::fmt;
 use std::mem;
-use std::num::{one, zero};
+use std::ops::*;
 
 use approx::ApproxEq;
-use array::Array1;
-use num::{BaseNum, BaseFloat};
+use array::{Array1, FixedArray};
+use num::{BaseNum, BaseFloat, one, zero};
 use vector::*;
 
 /// A point in 2-dimensional space.
-#[deriving(PartialEq, Clone, Hash)]
+#[derive(PartialEq, Copy, Clone, Hash, RustcEncodable, RustcDecodable)]
 pub struct Point2<S> { pub x: S, pub y: S }
 
 /// A point in 3-dimensional space.
-#[deriving(PartialEq, Clone, Hash)]
+#[derive(PartialEq, Copy, Clone, Hash, RustcEncodable, RustcDecodable)]
 pub struct Point3<S> { pub x: S, pub y: S, pub z: S }
 
 
@@ -53,12 +53,12 @@ impl<S: BaseNum> Point3<S> {
     #[inline]
     pub fn from_homogeneous(v: &Vector4<S>) -> Point3<S> {
         let e = v.truncate().mul_s(one::<S>() / v.w);
-        Point3::new(e.x.clone(), e.y.clone(), e.z.clone())  //FIXME
+        Point3::new(e.x, e.y, e.z)  //FIXME
     }
 
     #[inline]
     pub fn to_homogeneous(&self) -> Vector4<S> {
-        Vector4::new(self.x.clone(), self.y.clone(), self.z.clone(), one())
+        Vector4::new(self.x, self.y, self.z, one())
     }
 }
 
@@ -102,27 +102,57 @@ pub trait Point<S: BaseNum, V: Vector<S>>: Array1<S> + Clone {
     fn max(&self, p: &Self) -> Self;
 }
 
+impl<S> FixedArray<[S; 2]> for Point2<S> {
+    #[inline]
+    fn into_fixed(self) -> [S; 2] {
+        match self { Point2 { x, y } => [x, y] }
+    }
+
+    #[inline]
+    fn as_fixed<'a>(&'a self) -> &'a [S; 2] {
+        unsafe { mem::transmute(self) }
+    }
+
+    #[inline]
+    fn as_mut_fixed<'a>(&'a mut self) -> &'a mut [S; 2] {
+        unsafe { mem::transmute(self) }
+    }
+
+    #[inline]
+    fn from_fixed(_v: [S; 2]) -> Point2<S> {
+        // match v { [x, y] => Point2 { x: x, y: y } }
+        panic!("Unimplemented, pending a fix for rust-lang/rust#16418");
+    }
+
+    #[inline]
+    fn from_fixed_ref<'a>(v: &'a [S; 2]) -> &'a Point2<S> {
+        unsafe { mem::transmute(v) }
+    }
+
+    #[inline]
+    fn from_fixed_mut<'a>(v: &'a mut [S; 2]) -> &'a mut Point2<S> {
+        unsafe { mem::transmute(v) }
+    }
+}
+
+impl<S: BaseNum> Index<usize> for Point2<S> {
+    type Output = S;
+    #[inline]
+    fn index<'a>(&'a self, i: &usize) -> &'a S {
+        &self.as_fixed()[*i]
+    }
+}
+
+impl<S: BaseNum> IndexMut<usize> for Point2<S> {
+    #[inline]
+    fn index_mut<'a>(&'a mut self, i: &usize) -> &'a mut S {
+        &mut self.as_mut_fixed()[*i]
+    }
+}
+
 impl<S: BaseNum> Array1<S> for Point2<S> {
     #[inline]
-    fn ptr<'a>(&'a self) -> &'a S { &self.x }
-
-    #[inline]
-    fn mut_ptr<'a>(&'a mut self) -> &'a mut S { &mut self.x }
-
-    #[inline]
-    fn i(&self, i: uint) -> S {
-        let slice: &[S, ..2] = unsafe { mem::transmute(self) };
-        slice[i]
-    }
-
-    #[inline]
-    fn mut_i<'a>(&'a mut self, i: uint) -> &'a mut S {
-        let slice: &'a mut [S, ..2] = unsafe { mem::transmute(self) };
-        &mut slice[i]
-    }
-
-    #[inline]
-    fn map(&mut self, op: |S| -> S) -> Point2<S> {
+    fn map<F>(&mut self, mut op: F) -> Point2<S> where F: FnMut(S) -> S {
         self.x = op(self.x);
         self.y = op(self.y);
         *self
@@ -227,27 +257,58 @@ impl<S: BaseFloat> ApproxEq<S> for Point2<S> {
     }
 }
 
+impl<S> FixedArray<[S; 3]> for Point3<S> {
+    #[inline]
+    fn into_fixed(self) -> [S; 3] {
+        match self { Point3 { x, y, z } => [x, y, z] }
+    }
+
+    #[inline]
+    fn as_fixed<'a>(&'a self) -> &'a [S; 3] {
+        unsafe { mem::transmute(self) }
+    }
+
+    #[inline]
+    fn as_mut_fixed<'a>(&'a mut self) -> &'a mut [S; 3] {
+        unsafe { mem::transmute(self) }
+    }
+
+    #[inline]
+    fn from_fixed(_v: [S; 3]) -> Point3<S> {
+        // match v { [x, y, z] => Point3 { x: x, y: y, z: z } }
+        panic!("Unimplemented, pending a fix for rust-lang/rust#16418")
+    }
+
+    #[inline]
+    fn from_fixed_ref<'a>(v: &'a [S; 3]) -> &'a Point3<S> {
+        unsafe { mem::transmute(v) }
+    }
+
+    #[inline]
+    fn from_fixed_mut<'a>(v: &'a mut [S; 3]) -> &'a mut Point3<S> {
+        unsafe { mem::transmute(v) }
+    }
+}
+
+impl<S: BaseNum> Index<usize> for Point3<S> {
+    type Output = S;
+
+    #[inline]
+    fn index<'a>(&'a self, i: &usize) -> &'a S {
+        &self.as_fixed()[*i]
+    }
+}
+
+impl<S: BaseNum> IndexMut<usize> for Point3<S> {
+    #[inline]
+    fn index_mut<'a>(&'a mut self, i: &usize) -> &'a mut S {
+        &mut self.as_mut_fixed()[*i]
+    }
+}
+
 impl<S: BaseNum> Array1<S> for Point3<S> {
     #[inline]
-    fn ptr<'a>(&'a self) -> &'a S { &self.x }
-
-    #[inline]
-    fn mut_ptr<'a>(&'a mut self) -> &'a mut S { &mut self.x }
-
-    #[inline]
-    fn i(&self, i: uint) -> S {
-        let slice: &[S, ..3] = unsafe { mem::transmute(self) };
-        slice[i]
-    }
-
-    #[inline]
-    fn mut_i<'a>(&'a mut self, i: uint) -> &'a mut S {
-        let slice: &'a mut [S, ..3] = unsafe { mem::transmute(self) };
-        &mut slice[i]
-    }
-
-    #[inline]
-    fn map(&mut self, op: |S| -> S) -> Point3<S> {
+    fn map<F>(&mut self, mut op: F) -> Point3<S> where F: FnMut(S) -> S {
         self.x = op(self.x);
         self.y = op(self.y);
         self.z = op(self.z);
@@ -367,14 +428,14 @@ impl<S: BaseFloat> ApproxEq<S> for Point3<S> {
     }
 }
 
-impl<S: BaseNum> fmt::Show for Point2<S> {
+impl<S: BaseNum> fmt::Debug for Point2<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[{}, {}]", self.x, self.y)
+        write!(f, "[{:?}, {:?}]", self.x, self.y)
     }
 }
 
-impl<S: BaseNum> fmt::Show for Point3<S> {
+impl<S: BaseNum> fmt::Debug for Point3<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[{}, {}, {}]", self.x, self.y, self.z)
+        write!(f, "[{:?}, {:?}, {:?}]", self.x, self.y, self.z)
     }
 }

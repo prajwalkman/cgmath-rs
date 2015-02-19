@@ -13,22 +13,103 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Types and traits for two, three, and four-dimensional vectors.
+//!
+//! ## Working with Vectors
+//!
+//! Vectors can be created in several different ways. There is, of course, the
+//! traditional `new()` method, but unit vectors, zero vectors, and an identity
+//! vector are also provided:
+//!
+//! ```rust
+//! use cgmath::{Vector2, Vector3, Vector4, one, zero, vec3};
+//!
+//! assert_eq!(Vector2::new(1.0f64, 0.0f64), Vector2::unit_x());
+//! assert_eq!(vec3(0.0f64, 0.0f64, 0.0f64), zero());
+//! assert_eq!(Vector4::from_value(1.0f64), one());
+//! ```
+//!
+//! Vectors can be manipulated with typical mathematical operations (addition,
+//! subtraction, element-wise multiplication, element-wise division, negation)
+//! using the built-in operators. The additive and multiplicative neutral
+//! elements (zero and one) are also provided by this library
+//!
+//! ```rust
+//! use cgmath::{Vector2, Vector3, Vector4, one, zero};
+//!
+//! let a: Vector2<f64> = Vector2::new(3.0, 4.0);
+//! let b: Vector2<f64> = Vector2::new(-3.0, -4.0);
+//!
+//! assert_eq!(a + b, zero());
+//! assert_eq!(-(a * b), Vector2::new(9.0f64, 16.0f64));
+//! assert_eq!(a / one(), a);
+//!
+//! // As with Rust's `int` and `f32` types, Vectors of different types cannot
+//! // be added and so on with impunity. The following will fail to compile:
+//! // let c = a + Vector3::new(1.0, 0.0, 2.0);
+//!
+//! // Instead, we need to convert the Vector2 to a Vector3 by "extending" it
+//! // with the value for the last coordinate:
+//! let c: Vector3<f64> = a.extend(0.0) + Vector3::new(1.0, 0.0, 2.0);
+//!
+//! // Similarly, we can "truncate" a Vector4 down to a Vector3:
+//! let d: Vector3<f64> = c + Vector4::unit_x().truncate();
+//!
+//! assert_eq!(d, Vector3::new(5.0f64, 4.0f64, 2.0f64));
+//! ```
+//!
+//! Vectors also provide methods for typical operations such as
+//! [scalar multiplication](http://en.wikipedia.org/wiki/Scalar_multiplication),
+//! [dot products](http://en.wikipedia.org/wiki/Dot_product),
+//! and [cross products](http://en.wikipedia.org/wiki/Cross_product).
+//!
+//! ```rust
+//! use cgmath::{Vector, Vector2, Vector3, Vector4, dot, zero};
+//!
+//! // All vectors implement the dot product as a method:
+//! let a: Vector2<f64> = Vector2::new(3.0, 6.0);
+//! let b: Vector2<f64> = Vector2::new(-2.0, 1.0);
+//! assert_eq!(a.dot(&b), zero());
+//!
+//! // But there is also a top-level function:
+//! assert_eq!(a.dot(&b), dot(a, b));
+//!
+//! // Scalar multiplication can return a new object, or be done in place
+//! // to avoid an allocation:
+//! let mut c: Vector4<f64> = Vector4::from_value(3.0);
+//! let d: Vector4<f64> = c.mul_s(2.0);
+//! c.mul_self_s(2.0);
+//! assert_eq!(c, d);
+//!
+//! // Cross products are defined for 3-dimensional vectors:
+//! let e: Vector3<f64> = Vector3::unit_x();
+//! let f: Vector3<f64> = Vector3::unit_y();
+//! assert_eq!(e.cross(&f), Vector3::unit_z());
+//! ```
+//!
+//! Several other useful methods are provided as well. Vector fields can be
+//! accessed using array syntax (i.e. `vector[0] == vector.x`), or by using
+//! the methods provided by the [`Array1`](../array/trait.Array1.html) trait.
+//! This trait also provides a `map()` method for applying arbitrary functions.
+//!
+//! The [`Vector`](../trait.Vector.html) trait presents the most general
+//! features of the vectors, while [`EuclideanVector`]
+//! (../array/trait.EuclideanVector.html) is more specific to Euclidean space.
+
 use std::fmt;
 use std::mem;
-use std::num::{Zero, zero, One, one};
+use std::num::NumCast;
+use std::ops::*;
 
 use angle::{Rad, atan2, acos};
 use approx::ApproxEq;
-use array::Array1;
-use num::{BaseNum, BaseFloat};
+use array::{Array1, FixedArray};
+use num::{BaseNum, BaseFloat, Zero, One, zero, one};
 
 /// A trait that specifies a range of numeric operations for vectors. Not all
 /// of these make sense from a linear algebra point of view, but are included
 /// for pragmatic reasons.
-pub trait Vector<S: BaseNum>: Array1<S>
-                  + Neg<Self>
-                  + Zero
-                  + One {
+pub trait Vector<S: BaseNum>: Array1<S> + Zero + One + Neg<Output=Self> {
     /// Add a scalar to this vector, returning a new vector.
     fn add_s(&self, s: S) -> Self;
     /// Subtract a scalar from this vector, returning a new vector.
@@ -96,71 +177,122 @@ pub trait Vector<S: BaseNum>: Array1<S>
 
 // Utility macro for generating associated functions for the vectors
 macro_rules! vec(
-    ($Self:ident <$S:ident> { $($field:ident),+ }, $n:expr) => (
-        #[deriving(PartialEq, Eq, Clone, Hash)]
-        pub struct $Self<S> { $(pub $field: S),+ }
+    ($Self_:ident <$S:ident> { $($field:ident),+ }, $n:expr, $constructor:ident) => (
+        #[derive_Rand]
+        #[derive(PartialEq, Eq, Copy, Clone, Hash, RustcEncodable, RustcDecodable)]
+        pub struct $Self_<S> { $(pub $field: S),+ }
 
-        impl<$S> $Self<$S> {
+        impl<$S> $Self_<$S> {
             /// Construct a new vector, using the provided values.
             #[inline]
-            pub fn new($($field: $S),+) -> $Self<$S> {
-                $Self { $($field: $field),+ }
+            pub fn new($($field: $S),+) -> $Self_<$S> {
+                $Self_ { $($field: $field),+ }
             }
         }
 
-        impl<$S: Clone> $Self<$S> {
+        /// The short constructor.
+        #[inline]
+        pub fn $constructor<S>($($field: S),+) -> $Self_<S> {
+            $Self_::new($($field),+)
+        }
+
+        impl<$S: Copy> $Self_<$S> {
             /// Construct a vector from a single value, replicating it.
             #[inline]
-            pub fn from_value(value: $S) -> $Self<$S> {
-                $Self { $($field: value.clone()),+ }
+            pub fn from_value(value: $S) -> $Self_<$S> {
+                $Self_ { $($field: value),+ }
             }
         }
 
-        impl<$S: BaseNum> $Self<$S> {
-            /// The additive identity of the vector.
+        impl<$S: Zero> Zero for $Self_<$S> {
             #[inline]
-            pub fn zero() -> $Self<$S> { $Self::from_value(zero()) }
+            fn zero() -> $Self_<S> { $Self_ { $($field: zero()),+ } }
 
-            /// The multiplicative identity of the vector.
             #[inline]
-            pub fn ident() -> $Self<$S> { $Self::from_value(one()) }
+            fn is_zero(&self) -> bool { $((self.$field.is_zero()) )&&+ }
         }
 
-        impl<S: Copy> Array1<S> for $Self<S> {
+        impl<$S: One> One for $Self_<$S> {
             #[inline]
-            fn ptr<'a>(&'a self) -> &'a S { &self.x }
+            fn one() -> $Self_<$S> { $Self_ { $($field: one()),+ } }
+        }
 
+        impl<$S: NumCast + Copy> $Self_<$S> {
+            /// Component-wise casting to another type
             #[inline]
-            fn mut_ptr<'a>(&'a mut self) -> &'a mut S { &mut self.x }
+            pub fn cast<T: NumCast>(&self) -> $Self_<T> {
+                $Self_ { $($field: NumCast::from(self.$field).unwrap()),+ }
+            }
+        }
 
+        impl<$S> FixedArray<[$S; $n]> for $Self_<$S> {
             #[inline]
-            fn i(&self, i: uint) -> S {
-                let slice: &[S, ..$n] = unsafe { mem::transmute(self) };
-                slice[i]
+            fn into_fixed(self) -> [$S; $n] {
+                match self { $Self_ { $($field),+ } => [$($field),+] }
             }
 
             #[inline]
-            fn mut_i<'a>(&'a mut self, i: uint) -> &'a mut S {
-                let slice: &'a mut [S, ..$n] = unsafe { mem::transmute(self) };
-                &mut slice[i]
+            fn as_fixed<'a>(&'a self) -> &'a [$S; $n] {
+                unsafe { mem::transmute(self) }
             }
 
             #[inline]
-            fn map(&mut self, op: |S| -> S) -> $Self<S> { $(self.$field = op(self.$field);)+ *self }
+            fn as_mut_fixed<'a>(&'a mut self) -> &'a mut [$S; $n] {
+                unsafe { mem::transmute(self) }
+            }
+
+            #[inline]
+            fn from_fixed(_v: [$S; $n]) -> $Self_<$S> {
+                // match v { [$($field),+] => $Self { $($field: $field),+ } }
+                panic!("Unimplemented, pending a fix for rust-lang/rust#16418");
+            }
+
+            #[inline]
+            fn from_fixed_ref<'a>(v: &'a [$S; $n]) -> &'a $Self_<$S> {
+                unsafe { mem::transmute(v) }
+            }
+
+            #[inline]
+            fn from_fixed_mut<'a>(v: &'a mut [$S; $n]) -> &'a mut $Self_<$S> {
+                unsafe { mem::transmute(v) }
+            }
         }
 
-        impl<S: BaseNum> Vector<S> for $Self<S> {
-            #[inline] fn add_s(&self, s: S) -> $Self<S> { $Self::new($(self.$field + s),+) }
-            #[inline] fn sub_s(&self, s: S) -> $Self<S> { $Self::new($(self.$field - s),+) }
-            #[inline] fn mul_s(&self, s: S) -> $Self<S> { $Self::new($(self.$field * s),+) }
-            #[inline] fn div_s(&self, s: S) -> $Self<S> { $Self::new($(self.$field / s),+) }
-            #[inline] fn rem_s(&self, s: S) -> $Self<S> { $Self::new($(self.$field % s),+) }
+        impl<$S: Copy> Index<usize> for $Self_<$S> {
+            type Output = S;
 
-            #[inline] fn add_v(&self, v: &$Self<S>) -> $Self<S> { $Self::new($(self.$field + v.$field),+) }
-            #[inline] fn sub_v(&self, v: &$Self<S>) -> $Self<S> { $Self::new($(self.$field - v.$field),+) }
-            #[inline] fn mul_v(&self, v: &$Self<S>) -> $Self<S> { $Self::new($(self.$field * v.$field),+) }
-            #[inline] fn div_v(&self, v: &$Self<S>) -> $Self<S> { $Self::new($(self.$field / v.$field),+) }
-            #[inline] fn rem_v(&self, v: &$Self<S>) -> $Self<S> { $Self::new($(self.$field % v.$field),+) }
+            #[inline]
+            fn index<'a>(&'a self, i: &usize) -> &'a $S {
+                &self.as_fixed()[*i]
+            }
+        }
+
+        impl<$S: Copy> IndexMut<usize> for $Self_<$S> {
+            #[inline]
+            fn index_mut<'a>(&'a mut self, i: &usize) -> &'a mut $S {
+                &mut self.as_mut_fixed()[*i]
+            }
+        }
+
+        impl<$S: Copy> Array1<$S> for $Self_<$S> {
+            #[inline]
+            fn map<F>(&mut self, mut op: F) -> $Self_<$S> where F: FnMut($S) -> $S {
+                $(self.$field = op(self.$field);)+ *self
+            }
+        }
+
+        impl<S: BaseNum> Vector<S> for $Self_<S> {
+            #[inline] fn add_s(&self, s: S) -> $Self_<S> { $Self_::new($(self.$field + s),+) }
+            #[inline] fn sub_s(&self, s: S) -> $Self_<S> { $Self_::new($(self.$field - s),+) }
+            #[inline] fn mul_s(&self, s: S) -> $Self_<S> { $Self_::new($(self.$field * s),+) }
+            #[inline] fn div_s(&self, s: S) -> $Self_<S> { $Self_::new($(self.$field / s),+) }
+            #[inline] fn rem_s(&self, s: S) -> $Self_<S> { $Self_::new($(self.$field % s),+) }
+
+            #[inline] fn add_v(&self, v: &$Self_<S>) -> $Self_<S> { $Self_::new($(self.$field + v.$field),+) }
+            #[inline] fn sub_v(&self, v: &$Self_<S>) -> $Self_<S> { $Self_::new($(self.$field - v.$field),+) }
+            #[inline] fn mul_v(&self, v: &$Self_<S>) -> $Self_<S> { $Self_::new($(self.$field * v.$field),+) }
+            #[inline] fn div_v(&self, v: &$Self_<S>) -> $Self_<S> { $Self_::new($(self.$field / v.$field),+) }
+            #[inline] fn rem_v(&self, v: &$Self_<S>) -> $Self_<S> { $Self_::new($(self.$field % v.$field),+) }
 
             #[inline] fn neg_self(&mut self) { $(self.$field = -self.$field;)+ }
 
@@ -170,51 +302,68 @@ macro_rules! vec(
             #[inline] fn div_self_s(&mut self, s: S) { $(self.$field = self.$field / s;)+ }
             #[inline] fn rem_self_s(&mut self, s: S) { $(self.$field = self.$field % s;)+ }
 
-            #[inline] fn add_self_v(&mut self, v: &$Self<S>) { $(self.$field = self.$field + v.$field;)+ }
-            #[inline] fn sub_self_v(&mut self, v: &$Self<S>) { $(self.$field = self.$field - v.$field;)+ }
-            #[inline] fn mul_self_v(&mut self, v: &$Self<S>) { $(self.$field = self.$field * v.$field;)+ }
-            #[inline] fn div_self_v(&mut self, v: &$Self<S>) { $(self.$field = self.$field / v.$field;)+ }
-            #[inline] fn rem_self_v(&mut self, v: &$Self<S>) { $(self.$field = self.$field % v.$field;)+ }
+            #[inline] fn add_self_v(&mut self, v: &$Self_<S>) { $(self.$field = self.$field + v.$field;)+ }
+            #[inline] fn sub_self_v(&mut self, v: &$Self_<S>) { $(self.$field = self.$field - v.$field;)+ }
+            #[inline] fn mul_self_v(&mut self, v: &$Self_<S>) { $(self.$field = self.$field * v.$field;)+ }
+            #[inline] fn div_self_v(&mut self, v: &$Self_<S>) { $(self.$field = self.$field / v.$field;)+ }
+            #[inline] fn rem_self_v(&mut self, v: &$Self_<S>) { $(self.$field = self.$field % v.$field;)+ }
 
-            #[inline] fn comp_add(&self) -> S { fold!(&add, { $(self.$field),+ }) }
-            #[inline] fn comp_mul(&self) -> S { fold!(&mul, { $(self.$field),+ }) }
+            #[inline] fn comp_add(&self) -> S { fold!(add, { $(self.$field),+ }) }
+            #[inline] fn comp_mul(&self) -> S { fold!(mul, { $(self.$field),+ }) }
             #[inline] fn comp_min(&self) -> S { fold!(partial_min, { $(self.$field),+ }) }
             #[inline] fn comp_max(&self) -> S { fold!(partial_max, { $(self.$field),+ }) }
         }
 
-        impl<S: BaseNum> Add<$Self<S>, $Self<S>> for $Self<S> {
-            #[inline] fn add(&self, v: &$Self<S>) -> $Self<S> { self.add_v(v) }
-        }
+        impl<S: BaseNum> Add for $Self_<S> {
+            type Output = $Self_<S>;
 
-        impl<S: BaseNum> Sub<$Self<S>, $Self<S>> for $Self<S> {
-            #[inline] fn sub(&self, v: &$Self<S>) -> $Self<S> { self.sub_v(v) }
-        }
-
-        impl<S: BaseNum> Zero for $Self<S> {
-            #[inline] fn zero() -> $Self<S> { $Self::from_value(zero()) }
-            #[inline] fn is_zero(&self) -> bool { *self == zero() }
-        }
-
-        impl<S: BaseNum> Neg<$Self<S>> for $Self<S> {
-            #[inline] fn neg(&self) -> $Self<S> { $Self::new($(-self.$field),+) }
-        }
-
-        impl<S: BaseNum> Mul<$Self<S>, $Self<S>> for $Self<S> {
-            #[inline] fn mul(&self, v: &$Self<S>) -> $Self<S> { self.mul_v(v) }
-        }
-
-        impl<S: BaseNum> One for $Self<S> {
-            #[inline] fn one() -> $Self<S> { $Self::from_value(one()) }
-        }
-
-        impl<S: BaseFloat> ApproxEq<S> for $Self<S> {
             #[inline]
-            fn approx_eq_eps(&self, other: &$Self<S>, epsilon: &S) -> bool {
+            fn add(self, v: $Self_<S>) -> $Self_<S> { self.add_v(&v) }
+        }
+
+        impl<S: BaseNum> Sub for $Self_<S> {
+            type Output = $Self_<S>;
+
+            #[inline]
+            fn sub(self, v: $Self_<S>) -> $Self_<S> { self.sub_v(&v) }
+        }
+
+        impl<S: BaseNum> Neg for $Self_<S> {
+            type Output = $Self_<S>;
+
+            #[inline]
+            fn neg(self) -> $Self_<S> { $Self_::new($(-self.$field),+) }
+        }
+
+        impl<S: BaseNum> Mul for $Self_<S> {
+            type Output = $Self_<S>;
+
+            #[inline]
+            fn mul(self, v: $Self_<S>) -> $Self_<S> { self.mul_v(&v) }
+        }
+
+        impl<S: BaseNum> Div for $Self_<S> {
+            type Output = $Self_<S>;
+
+            #[inline]
+            fn div(self, v: $Self_<S>) -> $Self_<S> { self.div_v(&v) }
+        }
+
+        impl<S: BaseNum> Rem for $Self_<S> {
+            type Output = $Self_<S>;
+
+            #[inline]
+            fn rem(self, v: $Self_<S>) -> $Self_<S> { self.rem_v(&v) }
+        }
+
+        impl<S: BaseFloat> ApproxEq<S> for $Self_<S> {
+            #[inline]
+            fn approx_eq_eps(&self, other: &$Self_<S>, epsilon: &S) -> bool {
                 $(self.$field.approx_eq_eps(&other.$field, epsilon))&&+
             }
         }
     )
-)
+);
 
 macro_rules! fold {
     (&$method:ident, { $x:expr, $y:expr })                   => { $x.$method(&$y) };
@@ -225,9 +374,9 @@ macro_rules! fold {
     ($method:ident, { $x:expr, $y:expr, $z:expr, $w:expr })  => { $x.$method($y).$method($z).$method($w) };
 }
 
-vec!(Vector2<S> { x, y }, 2)
-vec!(Vector3<S> { x, y, z }, 3)
-vec!(Vector4<S> { x, y, z, w }, 4)
+vec!(Vector2<S> { x, y }, 2, vec2);
+vec!(Vector3<S> { x, y, z }, 3, vec3);
+vec!(Vector4<S> { x, y, z, w }, 4, vec4);
 
 /// Operations specific to numeric two-dimensional vectors.
 impl<S: BaseNum> Vector2<S> {
@@ -246,7 +395,7 @@ impl<S: BaseNum> Vector2<S> {
     /// provided `z`.
     #[inline]
     pub fn extend(&self, z: S)-> Vector3<S> {
-        Vector3::new(self.x.clone(), self.y.clone(), z)
+        Vector3::new(self.x, self.y, z)
     }
 }
 
@@ -263,8 +412,8 @@ impl<S: BaseNum> Vector3<S> {
     #[inline]
     pub fn cross(&self, other: &Vector3<S>) -> Vector3<S> {
         Vector3::new((self.y * other.z) - (self.z * other.y),
-                  (self.z * other.x) - (self.x * other.z),
-                  (self.x * other.y) - (self.y * other.x))
+                     (self.z * other.x) - (self.x * other.z),
+                     (self.x * other.y) - (self.y * other.x))
     }
 
     /// Calculates the cross product of the vector and `other`, then stores the
@@ -278,13 +427,13 @@ impl<S: BaseNum> Vector3<S> {
     /// provided `w`.
     #[inline]
     pub fn extend(&self, w: S)-> Vector4<S> {
-        Vector4::new(self.x.clone(), self.y.clone(), self.z.clone(), w)
+        Vector4::new(self.x, self.y, self.z, w)
     }
 
     /// Create a `Vector2`, dropping the `z` value.
     #[inline]
     pub fn truncate(&self)-> Vector2<S> {
-        Vector2::new(self.x.clone(), self.y.clone())
+        Vector2::new(self.x, self.y)
     }
 }
 
@@ -302,18 +451,18 @@ impl<S: BaseNum> Vector4<S> {
     /// Create a `Vector3`, dropping the `w` value.
     #[inline]
     pub fn truncate(&self)-> Vector3<S> {
-        Vector3::new(self.x.clone(), self.y.clone(), self.z.clone())
+        Vector3::new(self.x, self.y, self.z)
     }
 
     /// Create a `Vector3`, dropping the nth element
     #[inline]
-    pub fn truncate_n(&self, n: int)-> Vector3<S> {
+    pub fn truncate_n(&self, n: isize)-> Vector3<S> {
         match n {
-            0 => Vector3::new(self.y.clone(), self.z.clone(), self.w.clone()),
-            1 => Vector3::new(self.x.clone(), self.z.clone(), self.w.clone()),
-            2 => Vector3::new(self.x.clone(), self.y.clone(), self.w.clone()),
-            3 => Vector3::new(self.x.clone(), self.y.clone(), self.z.clone()),
-            _ => fail!("{} is out of range", n)
+            0 => Vector3::new(self.y, self.z, self.w),
+            1 => Vector3::new(self.x, self.z, self.w),
+            2 => Vector3::new(self.x, self.y, self.w),
+            3 => Vector3::new(self.x, self.y, self.z),
+            _ => panic!("{:?} is out of range", n)
         }
     }
 }
@@ -321,7 +470,8 @@ impl<S: BaseNum> Vector4<S> {
 /// Specifies geometric operations for vectors. This is only implemented for
 /// 2-dimensional and 3-dimensional vectors.
 pub trait EuclideanVector<S: BaseFloat>: Vector<S>
-                                       + ApproxEq<S> {
+                                       + ApproxEq<S>
+                                       + Sized {
     /// Returns `true` if the vector is perpendicular (at right angles) to the
     /// other vector.
     fn is_perpendicular(&self, other: &Self) -> bool {
@@ -408,20 +558,20 @@ impl<S: BaseFloat> EuclideanVector<S> for Vector4<S> {
     }
 }
 
-impl<S: BaseNum> fmt::Show for Vector2<S> {
+impl<S: BaseNum> fmt::Debug for Vector2<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[{}, {}]", self.x, self.y)
+        write!(f, "[{:?}, {:?}]", self.x, self.y)
     }
 }
 
-impl<S: BaseNum> fmt::Show for Vector3<S> {
+impl<S: BaseNum> fmt::Debug for Vector3<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[{}, {}, {}]", self.x, self.y, self.z)
+        write!(f, "[{:?}, {:?}, {:?}]", self.x, self.y, self.z)
     }
 }
 
-impl<S: BaseNum> fmt::Show for Vector4<S> {
+impl<S: BaseNum> fmt::Debug for Vector4<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[{}, {}, {}, {}]", self.x, self.y, self.z, self.w)
+        write!(f, "[{:?}, {:?}, {:?}, {:?}]", self.x, self.y, self.z, self.w)
     }
 }

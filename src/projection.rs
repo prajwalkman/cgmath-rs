@@ -13,19 +13,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::{zero, one, cast};
+use std::num::cast;
 
 use angle::{Angle, tan, cot};
 use frustum::Frustum;
 use matrix::{Matrix4, ToMatrix4};
-use num::BaseFloat;
+use num::{BaseFloat, zero, one};
 use plane::Plane;
 
 /// Create a perspective projection matrix.
 ///
 /// This is the equivalent to the [gluPerspective]
 /// (http://www.opengl.org/sdk/docs/man2/xhtml/gluPerspective.xml) function.
-pub fn perspective<S: BaseFloat, A: Angle<S>>(fovy: A, aspect: S, near: S, far: S) -> Matrix4<S> {
+pub fn perspective<S: BaseFloat + 'static, A: Angle<S>>(fovy: A, aspect: S, near: S, far: S) -> Matrix4<S> {
     PerspectiveFov {
         fovy:   fovy,
         aspect: aspect,
@@ -38,7 +38,7 @@ pub fn perspective<S: BaseFloat, A: Angle<S>>(fovy: A, aspect: S, near: S, far: 
 ///
 /// This is the equivalent of the now deprecated [glFrustrum]
 /// (http://www.opengl.org/sdk/docs/man2/xhtml/glFrustum.xml) function.
-pub fn frustum<S: BaseFloat>(left: S, right: S, bottom: S, top: S, near: S, far: S) -> Matrix4<S> {
+pub fn frustum<S: BaseFloat + 'static>(left: S, right: S, bottom: S, top: S, near: S, far: S) -> Matrix4<S> {
     Perspective {
         left:   left,
         right:  right,
@@ -53,7 +53,7 @@ pub fn frustum<S: BaseFloat>(left: S, right: S, bottom: S, top: S, near: S, far:
 ///
 /// This is the equivalent of the now deprecated [glOrtho]
 /// (http://www.opengl.org/sdk/docs/man2/xhtml/glOrtho.xml) function.
-pub fn ortho<S: BaseFloat>(left: S, right: S, bottom: S, top: S, near: S, far: S) -> Matrix4<S> {
+pub fn ortho<S: BaseFloat + 'static>(left: S, right: S, bottom: S, top: S, near: S, far: S) -> Matrix4<S> {
     Ortho {
         left:   left,
         right:  right,
@@ -69,7 +69,7 @@ pub trait Projection<S>: ToMatrix4<S> {
 }
 
 /// A perspective projection based on a vertical field-of-view angle.
-#[deriving(Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct PerspectiveFov<S, A> {
     pub fovy:   A,
     pub aspect: S,
@@ -79,7 +79,7 @@ pub struct PerspectiveFov<S, A> {
 
 impl<S: BaseFloat, A: Angle<S>> PerspectiveFov<S, A> {
     pub fn to_perspective(&self) -> Perspective<S> {
-        let angle = self.fovy.div_s(cast(2i).unwrap());
+        let angle = self.fovy.div_s(cast(2i8).unwrap());
         let ymax = self.near * tan(angle.to_rad());
         let xmax = ymax * self.aspect;
 
@@ -94,7 +94,7 @@ impl<S: BaseFloat, A: Angle<S>> PerspectiveFov<S, A> {
     }
 }
 
-impl<S: BaseFloat, A: Angle<S>> Projection<S> for PerspectiveFov<S, A> {
+impl<S: BaseFloat + 'static, A: Angle<S>> Projection<S> for PerspectiveFov<S, A> {
     fn to_frustum(&self) -> Frustum<S> {
         // TODO: Could this be faster?
         Frustum::from_matrix4(self.to_matrix4())
@@ -105,15 +105,15 @@ impl<S: BaseFloat, A: Angle<S>> ToMatrix4<S> for PerspectiveFov<S, A> {
     fn to_matrix4(&self) -> Matrix4<S> {
         let half_turn: A = Angle::turn_div_2();
 
-        assert!(self.fovy   > zero(),    "The vertical field of view cannot be below zero, found: {}", self.fovy);
-        assert!(self.fovy   < half_turn, "The vertical field of view cannot be greater than a half turn, found: {}", self.fovy);
-        assert!(self.aspect > zero(),    "The aspect ratio cannot be below zero, found: {}", self.aspect);
-        assert!(self.near   > zero(),    "The near plane distance cannot be below zero, found: {}", self.near);
-        assert!(self.far    > zero(),    "The far plane distance cannot be below zero, found: {}", self.far);
-        assert!(self.far    > self.near, "The far plane cannot be closer than the near plane, found: far: {}, near: {}", self.far, self.near);
+        assert!(self.fovy   > zero(),    "The vertical field of view cannot be below zero, found: {:?}", self.fovy);
+        assert!(self.fovy   < half_turn, "The vertical field of view cannot be greater than a half turn, found: {:?}", self.fovy);
+        assert!(self.aspect > zero(),    "The aspect ratio cannot be below zero, found: {:?}", self.aspect);
+        assert!(self.near   > zero(),    "The near plane distance cannot be below zero, found: {:?}", self.near);
+        assert!(self.far    > zero(),    "The far plane distance cannot be below zero, found: {:?}", self.far);
+        assert!(self.far    > self.near, "The far plane cannot be closer than the near plane, found: far: {:?}, near: {:?}", self.far, self.near);
 
-        let f = cot(self.fovy.div_s(cast(2i).unwrap()).to_rad());
-        let two: S = cast(2i).unwrap();
+        let f = cot(self.fovy.div_s(cast(2i8).unwrap()).to_rad());
+        let two: S = cast(2i8).unwrap();
 
         let c0r0 = f / self.aspect;
         let c0r1 = zero();
@@ -143,27 +143,27 @@ impl<S: BaseFloat, A: Angle<S>> ToMatrix4<S> for PerspectiveFov<S, A> {
 }
 
 /// A perspective projection with arbitrary left/right/bottom/top distances
-#[deriving(Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct Perspective<S> {
     pub left:   S,  right:  S,
     pub bottom: S,  top:    S,
     pub near:   S,  far:    S,
 }
 
-impl<S: BaseFloat> Projection<S> for Perspective<S> {
+impl<S: BaseFloat + 'static> Projection<S> for Perspective<S> {
     fn to_frustum(&self) -> Frustum<S> {
         // TODO: Could this be faster?
         Frustum::from_matrix4(self.to_matrix4())
     }
 }
 
-impl<S: BaseFloat> ToMatrix4<S> for Perspective<S> {
+impl<S: BaseFloat + 'static> ToMatrix4<S> for Perspective<S> {
     fn to_matrix4(&self) -> Matrix4<S> {
-        assert!(self.left   > self.right, "`left` cannot be greater than `right`, found: left: {} right: {}", self.left, self.right);
-        assert!(self.bottom > self.top,   "`bottom` cannot be greater than `top`, found: bottom: {} top: {}", self.bottom, self.top);
-        assert!(self.near   > self.far,   "`near` cannot be greater than `far`, found: near: {} far: {}", self.near, self.far);
+        assert!(self.left   <= self.right, "`left` cannot be greater than `right`, found: left: {:?} right: {:?}", self.left, self.right);
+        assert!(self.bottom <= self.top,   "`bottom` cannot be greater than `top`, found: bottom: {:?} top: {:?}", self.bottom, self.top);
+        assert!(self.near   <= self.far,   "`near` cannot be greater than `far`, found: near: {:?} far: {:?}", self.near, self.far);
 
-        let two: S = cast(2i).unwrap();
+        let two: S = cast(2i8).unwrap();
 
         let c0r0 = (two * self.near) / (self.right - self.left);
         let c0r1 = zero();
@@ -193,7 +193,7 @@ impl<S: BaseFloat> ToMatrix4<S> for Perspective<S> {
 }
 
 /// An orthographic projection with arbitrary left/right/bottom/top distances
-#[deriving(Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct Ortho<S> {
     pub left:   S,  right:  S,
     pub bottom: S,  top:    S,
@@ -215,11 +215,7 @@ impl<S: BaseFloat> Projection<S> for Ortho<S> {
 
 impl<S: BaseFloat> ToMatrix4<S> for Ortho<S> {
     fn to_matrix4(&self) -> Matrix4<S> {
-        assert!(self.left   < self.right, "`left` cannot be greater than `right`, found: left: {} right: {}", self.left, self.right);
-        assert!(self.bottom < self.top,   "`bottom` cannot be greater than `top`, found: bottom: {} top: {}", self.bottom, self.top);
-        assert!(self.near   < self.far,   "`near` cannot be greater than `far`, found: near: {} far: {}", self.near, self.far);
-
-        let two: S = cast(2i).unwrap();
+        let two: S = cast(2i8).unwrap();
 
         let c0r0 = two / (self.right - self.left);
         let c0r1 = zero();
@@ -234,7 +230,7 @@ impl<S: BaseFloat> ToMatrix4<S> for Ortho<S> {
         let c2r0 = zero();
         let c2r1 = zero();
         let c2r2 = -two / (self.far - self.near);
-        let c2r3 = -one::<S>();
+        let c2r3 = zero();
 
         let c3r0 = -(self.right + self.left) / (self.right - self.left);
         let c3r1 = -(self.top + self.bottom) / (self.top - self.bottom);

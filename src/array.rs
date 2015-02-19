@@ -15,88 +15,89 @@
 
 use std::mem;
 use std::ptr;
+use std::ops::*;
 
 /// An array containing elements of type `Element`
-pub trait Array1<Element: Copy> {
+pub trait Array1<Element: Copy>: Index<usize, Output=Element> + IndexMut<usize, Output=Element> {
     /// Get the pointer to the first element of the array.
-    fn ptr<'a>(&'a self) -> &'a Element;
+    fn ptr<'a>(&'a self) -> &'a Element {
+        &(*self)[0]
+    }
 
     /// Get a mutable pointer to the first element of the array.
-    fn mut_ptr<'a>(&'a mut self) -> &'a mut Element;
+    fn mut_ptr<'a>(&'a mut self) -> &'a mut Element {
+        &mut (*self)[0]
+    }
 
-    /// Get a shared reference to the `i`th value.
-    fn i(&self, i: uint) -> Element;
-
-    /// Get a mutable reference to the `i`th value.
-    fn mut_i<'a>(&'a mut self, i: uint) -> &'a mut Element;
-
+    /// Swap the elements at indices `i` and `j` in-place.
     #[inline]
-    /// Swap the elements at indices `a` and `b` in-place.
-    fn swap_i(&mut self, a: uint, b: uint) {
+    fn swap_elems(&mut self, i: usize, j: usize) {
         // Yeah, ok borrow checker – I know what I'm doing here
-        unsafe { ptr::swap(self.mut_i(a), self.mut_i(b)) };
+        unsafe { ptr::swap(&mut (*self)[i], &mut (*self)[j]) };
     }
 
     /// Replace an element in the array.
     #[inline]
-    fn replace_i(&mut self, i: uint, src: Element) -> Element {
-        mem::replace(self.mut_i(i), src)
+    fn replace_elem(&mut self, i: usize, src: Element) -> Element {
+        mem::replace(&mut (*self)[i], src)
     }
 
     /// Apply a function to each element.
-    fn map(&mut self, op: |Element| -> Element) -> Self;
+    fn map<F>(&mut self, op: F) -> Self
+        where F:  FnMut(Element) -> Element;
 }
 
 /// A column-major array
-pub trait Array2<Column: Array1<Element>, Row: Array1<Element>, Element: Copy> {
+pub trait Array2<Column: Array1<Element>+'static, Row: Array1<Element>, Element: Copy>:
+        Index<usize, Output=Column> + IndexMut<usize, Output=Column> {
     /// Get the pointer to the first element of the array.
-    fn ptr<'a>(&'a self) -> &'a Element;
+    fn ptr<'a>(&'a self) -> &'a Element {
+        &(*self)[0][0]
+    }
 
     /// Get a mutable pointer to the first element of the array.
-    fn mut_ptr<'a>(&'a mut self) -> &'a mut Element;
-
-    /// Get a shared reference to a column of this array.
-    fn c<'a>(&'a self, c: uint) -> &'a Column;
-
-    /// Get a mutable reference to a column of this array.
-    fn mut_c<'a>(&'a mut self, c: uint) -> &'a mut Column;
+    fn mut_ptr<'a>(&'a mut self) -> &'a mut Element {
+        &mut (*self)[0][0]
+    }
 
     /// Swap two columns of this array.
     #[inline]
-    fn swap_c(&mut self, a: uint, b: uint) {
-        unsafe { ptr::swap(self.mut_c(a), self.mut_c(b)) };
+    fn swap_cols(&mut self, a: usize, b: usize) {
+        unsafe { ptr::swap(&mut (*self)[a], &mut (*self)[b]) };
     }
 
     /// Replace a column in the array.
     #[inline]
-    fn replace_c(&mut self, c: uint, src: Column) -> Column {
-        mem::replace(self.mut_c(c), src)
+    fn replace_col(&mut self, c: usize, src: Column) -> Column {
+        mem::replace(&mut (*self)[c], src)
     }
 
     /// Get a row from this array by-value.
-    fn r(&self, r: uint) -> Row;
+    fn row(&self, r: usize) -> Row;
 
     /// Swap two rows of this array.
-    fn swap_r(&mut self, a: uint, b: uint);
-
-    /// Return a shared reference to the element at column `c` and row `r`.
-    #[inline]
-    fn cr(&self, c: uint, r: uint) -> Element { self.c(c).i(r) }
-
-    /// Return a mutable reference to the element at column `c` and row `r`.
-    #[inline]
-    fn mut_cr<'a>(&'a mut self, c: uint, r: uint) -> &'a mut Element {
-        self.mut_c(c).mut_i(r)
-    }
+    fn swap_rows(&mut self, a: usize, b: usize);
 
     /// Swap the values at index `a` and `b`
     #[inline]
-    fn swap_cr(&mut self, a: (uint, uint), b: (uint, uint)) {
+    fn swap_elems(&mut self, a: (usize, usize), b: (usize, usize)) {
         let (ac, ar) = a;
         let (bc, br) = b;
-        unsafe { ptr::swap(self.mut_cr(ac, ar), self.mut_cr(bc, br)) };
+        unsafe { ptr::swap(&mut (*self)[ac][ar], &mut (*self)[bc][br]) };
     }
 
     /// Apply a function to each column.
-    fn map(&mut self, op: |&Column| -> Column) -> Self;
+    fn map<F>(&mut self, op: F) -> Self
+        where F: FnMut(&Column) -> Column;
+}
+
+/// Homogeneous arrays of elements that can be converted to and from `[T, ..N]`
+/// arrays.
+pub trait FixedArray<V> {
+    fn into_fixed(self) -> V;
+    fn as_fixed<'a>(&'a self) -> &'a V;
+    fn as_mut_fixed<'a>(&'a mut self) -> &'a mut V;
+    fn from_fixed(v: V) -> Self;
+    fn from_fixed_ref<'a>(v: &'a V) -> &'a Self;
+    fn from_fixed_mut<'a>(v: &'a mut V) -> &'a mut Self;
 }

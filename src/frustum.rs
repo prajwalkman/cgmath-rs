@@ -22,7 +22,7 @@ use plane::Plane;
 use point::Point3;
 use vector::{Vector, EuclideanVector};
 
-#[deriving(Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct Frustum<S> {
     pub left:   Plane<S>,
     pub right:  Plane<S>,
@@ -32,7 +32,7 @@ pub struct Frustum<S> {
     pub far:    Plane<S>,
 }
 
-impl<S: BaseFloat>
+impl<S: BaseFloat + 'static>
 Frustum<S> {
     /// Constructs a frustum
     pub fn new(left:   Plane<S>, right:  Plane<S>,
@@ -50,16 +50,16 @@ Frustum<S> {
 
     /// Extracts frustum planes from a projection matrix
     pub fn from_matrix4(mat: Matrix4<S>) -> Frustum<S> {
-        Frustum::new(Plane::from_vector4(mat.r(3).add_v(&mat.r(0)).normalize()),
-                     Plane::from_vector4(mat.r(3).sub_v(&mat.r(0)).normalize()),
-                     Plane::from_vector4(mat.r(3).add_v(&mat.r(1)).normalize()),
-                     Plane::from_vector4(mat.r(3).sub_v(&mat.r(1)).normalize()),
-                     Plane::from_vector4(mat.r(3).add_v(&mat.r(2)).normalize()),
-                     Plane::from_vector4(mat.r(3).sub_v(&mat.r(2)).normalize()))
+        Frustum::new(Plane::from_vector4(mat.row(3).add_v(&mat.row(0)).normalize()),
+                     Plane::from_vector4(mat.row(3).sub_v(&mat.row(0)).normalize()),
+                     Plane::from_vector4(mat.row(3).add_v(&mat.row(1)).normalize()),
+                     Plane::from_vector4(mat.row(3).sub_v(&mat.row(1)).normalize()),
+                     Plane::from_vector4(mat.row(3).add_v(&mat.row(2)).normalize()),
+                     Plane::from_vector4(mat.row(3).sub_v(&mat.row(2)).normalize()))
     }
 }
 
-#[deriving(Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct FrustumPoints<S> {
     pub near_top_left:     Point3<S>,
     pub near_top_right:    Point3<S>,

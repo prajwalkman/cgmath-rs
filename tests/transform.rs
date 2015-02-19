@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use cgmath::quaternion::*;
-use cgmath::transform::*;
-use cgmath::point::*;
-use cgmath::vector::*;
-use cgmath::approx::ApproxEq;
+
+extern crate cgmath;
+
+use cgmath::*;
 
 #[test]
 fn test_invert() {

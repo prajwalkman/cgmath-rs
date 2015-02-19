@@ -1,4 +1,4 @@
-// Copyright 2013 The CGMath Developers. For a full listing of the authors,
+// Copyright 2013-2014 The CGMath Developers. For a full listing of the authors,
 // refer to the AUTHORS file at the top-level directory of this distribution.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,13 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use cgmath::matrix::*;
-use cgmath::vector::*;
-use cgmath::approx::ApproxEq;
+#![feature(core)]
+
+
+extern crate cgmath;
+
+use cgmath::*;
+use std::f64;
 
 pub mod matrix2 {
-    use cgmath::matrix::*;
-    use cgmath::vector::*;
+    use cgmath::*;
 
     pub static A: Matrix2<f64> = Matrix2 { x: Vector2 { x: 1.0f64, y: 3.0f64 },
                                            y: Vector2 { x: 2.0f64, y: 4.0f64 } };
@@ -33,8 +36,7 @@ pub mod matrix2 {
 }
 
 pub mod matrix3 {
-    use cgmath::matrix::*;
-    use cgmath::vector::*;
+    use cgmath::*;
 
     pub static A: Matrix3<f64> = Matrix3 { x: Vector3 { x: 1.0f64, y: 4.0f64, z:  7.0f64 },
                                            y: Vector3 { x: 2.0f64, y: 5.0f64, z:  8.0f64 },
@@ -54,8 +56,7 @@ pub mod matrix3 {
 }
 
 pub mod matrix4 {
-    use cgmath::matrix::*;
-    use cgmath::vector::*;
+    use cgmath::*;
 
     pub static A: Matrix4<f64> = Matrix4 { x: Vector4 { x: 1.0f64, y: 5.0f64, z:  9.0f64, w: 13.0f64 },
                                            y: Vector4 { x: 2.0f64, y: 6.0f64, z: 10.0f64, w: 14.0f64 },
@@ -394,4 +395,19 @@ fn test_predicates() {
     assert!(matrix4::D.is_invertible());
 
     assert!(Matrix4::from_value(6.0f64).is_diagonal());
+}
+
+#[test]
+fn test_from_angle() {
+    // Rotate the vector (1, 0) by π/2 radians to the vector (0, 1)
+    let rot1 = Matrix2::from_angle(rad(0.5f64 * f64::consts::PI));
+    assert!(rot1.mul_v(&Vector2::unit_x()).approx_eq(&Vector2::unit_y()));
+
+    // Rotate the vector (-1, 0) by -π/2 radians to the vector (0, 1)
+    let rot2 = -rot1;
+    assert!(rot2.mul_v(&-Vector2::unit_x()).approx_eq(&Vector2::unit_y()));
+
+    // Rotate the vector (1, 1) by π radians to the vector (-1, -1)
+    let rot3: Matrix2<f64> = Matrix2::from_angle(rad(f64::consts::PI));
+    assert!(rot3.mul_v(&Vector2::new(1.0, 1.0)).approx_eq(&Vector2::new(-1.0, -1.0)));
 }

@@ -15,20 +15,23 @@
 
 use std::fmt;
 use std::mem;
-use std::num::{zero, one, cast};
+use std::f64;
+use std::num::{cast, Float};
+use std::ops::*;
 
-use angle::{Angle, Rad, acos, sin, sin_cos};
+use angle::{Angle, Rad, acos, sin, sin_cos, rad};
 use approx::ApproxEq;
 use array::Array1;
 use matrix::{Matrix3, ToMatrix3, ToMatrix4, Matrix4};
-use num::BaseFloat;
+use num::{BaseFloat, one, zero};
 use point::Point3;
 use rotation::{Rotation, Rotation3, Basis3, ToBasis3};
 use vector::{Vector3, Vector, EuclideanVector};
 
 /// A [quaternion](https://en.wikipedia.org/wiki/Quaternion) in scalar/vector
 /// form.
-#[deriving(Clone, PartialEq)]
+#[derive_Rand]
+#[derive(Copy, Clone, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct Quaternion<S> { pub s: S, pub v: Vector3<S> }
 
 /// Represents types which can be expressed as a quaternion.
@@ -37,32 +40,32 @@ pub trait ToQuaternion<S: BaseFloat> {
     fn to_quaternion(&self) -> Quaternion<S>;
 }
 
-impl<S: Copy> Array1<S> for Quaternion<S> {
+impl<S: Copy + BaseFloat> Array1<S> for Quaternion<S> {
     #[inline]
-    fn ptr<'a>(&'a self) -> &'a S { &self.s }
-
-    #[inline]
-    fn mut_ptr<'a>(&'a mut self) -> &'a mut S { &mut self.s }
-
-    #[inline]
-    fn i(&self, i: uint) -> S {
-        let slice: &[S, ..4] = unsafe { mem::transmute(self) };
-        slice[i]
-    }
-
-    #[inline]
-    fn mut_i<'a>(&'a mut self, i: uint) -> &'a mut S {
-        let slice: &'a mut [S, ..4] = unsafe { mem::transmute(self) };
-        &mut slice[i]
-    }
-
-    #[inline]
-    fn map(&mut self, op: |S| -> S) -> Quaternion<S> {
+    fn map<F>(&mut self, mut op: F) -> Quaternion<S> where F: FnMut(S) -> S {
         self.s = op(self.s);
         self.v.x = op(self.v.x);
         self.v.y = op(self.v.y);
         self.v.z = op(self.v.z);
         *self
+    }
+}
+
+impl<S: BaseFloat> Index<usize> for Quaternion<S> {
+    type Output = S;
+
+    #[inline]
+    fn index<'a>(&'a self, i: &usize) -> &'a S {
+        let slice: &[S; 4] = unsafe { mem::transmute(self) };
+        &slice[*i]
+    }
+}
+
+impl<S: BaseFloat> IndexMut<usize> for Quaternion<S> {
+    #[inline]
+    fn index_mut<'a>(&'a mut self, i: &usize) -> &'a mut S {
+        let slice: &'a mut [S; 4] = unsafe { mem::transmute(self) };
+        &mut slice[*i]
     }
 }
 
@@ -89,7 +92,7 @@ impl<S: BaseFloat> Quaternion<S> {
     /// The multiplicative identity, ie: `q = 1 + 0i + 0j + 0i`
     #[inline]
     pub fn identity() -> Quaternion<S> {
-        Quaternion::from_sv(one::<S>(), Vector3::zero())
+        Quaternion::from_sv(one::<S>(), zero())
     }
 
     /// The result of multiplying the quaternion a scalar
@@ -108,7 +111,7 @@ impl<S: BaseFloat> Quaternion<S> {
     #[inline]
     pub fn mul_v(&self, vec: &Vector3<S>) -> Vector3<S>  {
         let tmp = self.v.cross(vec).add_v(&vec.mul_s(self.s.clone()));
-        self.v.cross(&tmp).mul_s(cast(2i).unwrap()).add_v(vec)
+        self.v.cross(&tmp).mul_s(cast(2i8).unwrap()).add_v(vec)
     }
 
     /// The sum of this quaternion and `other`
@@ -265,6 +268,45 @@ impl<S: BaseFloat> Quaternion<S> {
                 .mul_s(sin(theta).recip())
         }
     }
+
+    /// Convert a Quaternion to Eular angles
+    ///     This is a polar singularity aware conversion
+    ///
+    ///  Based on:
+    /// - [Maths - Conversion Quaternion to Euler]
+    ///   (http://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/)
+    pub fn to_euler(&self) -> (Rad<S>, Rad<S>, Rad<S>) {
+        let sig: S = cast(0.499f64).unwrap();
+        let two: S = cast(2f64).unwrap();
+        let one: S = cast(1f64).unwrap();
+
+        let (qw, qx, qy, qz) = (self.s, self.v.x, self.v.y, self.v.z);
+        let (sqw, sqx, sqy, sqz) = (qw*qw, qx*qx, qy*qy, qz*qz);
+
+        let unit = sqx + sqy + sqz + sqw;
+        let test = qx*qy + qz*qw;
+
+        if test > sig * unit {
+            (
+                rad(zero::<S>()),
+                rad(cast(f64::consts::FRAC_PI_2).unwrap()),
+                rad(two * qx.atan2(qw)),
+            )
+        } else if test < -sig * unit {
+            let y: S = cast(f64::consts::FRAC_PI_2).unwrap();
+            (
+                rad(zero::<S>()),
+                rad(-y),
+                rad(two * qx.atan2(qw)),
+            )
+        } else {
+            (
+                rad((two * (qy*qw - qx*qz)).atan2(one - two*(sqy + sqz))),
+                rad((two * (qx*qy + qz*qw)).asin()),
+                rad((two * (qx*qw - qy*qz)).atan2(one - two*(sqx + sqz))),
+            )
+        }
+    }
 }
 
 impl<S: BaseFloat> ToMatrix3<S> for Quaternion<S> {
@@ -318,16 +360,18 @@ impl<S: BaseFloat> ToMatrix4<S> for Quaternion<S> {
     }
 }
 
-impl<S: BaseFloat> Neg<Quaternion<S>> for Quaternion<S> {
+impl<S: BaseFloat> Neg for Quaternion<S> {
+    type Output = Quaternion<S>;
+
     #[inline]
-    fn neg(&self) -> Quaternion<S> {
+    fn neg(self) -> Quaternion<S> {
         Quaternion::from_sv(-self.s, -self.v)
     }
 }
 
-impl<S: BaseFloat> fmt::Show for Quaternion<S> {
+impl<S: BaseFloat> fmt::Debug for Quaternion<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} + {}i + {}j + {}k",
+        write!(f, "{:?} + {:?}i + {:?}j + {:?}k",
                 self.s,
                 self.v.x,
                 self.v.y,
@@ -347,7 +391,7 @@ impl<S: BaseFloat> ToQuaternion<S> for Quaternion<S> {
     fn to_quaternion(&self) -> Quaternion<S> { self.clone() }
 }
 
-impl<S: BaseFloat> Rotation<S, Vector3<S>, Point3<S>> for Quaternion<S> {
+impl<S: BaseFloat + 'static> Rotation<S, Vector3<S>, Point3<S>> for Quaternion<S> {
     #[inline]
     fn identity() -> Quaternion<S> { Quaternion::identity() }
 
@@ -379,22 +423,23 @@ impl<S: BaseFloat> Rotation<S, Vector3<S>, Point3<S>> for Quaternion<S> {
     fn invert_self(&mut self) { *self = self.invert() }
 }
 
-impl<S: BaseFloat> Rotation3<S> for Quaternion<S> {
+impl<S: BaseFloat> Rotation3<S> for Quaternion<S> where S: 'static {
     #[inline]
     fn from_axis_angle(axis: &Vector3<S>, angle: Rad<S>) -> Quaternion<S> {
         let (s, c) = sin_cos(angle.mul_s(cast(0.5f64).unwrap()));
         Quaternion::from_sv(c, axis.mul_s(s))
     }
 
+    /// - [Maths - Conversion Euler to Quaternion]
+    ///   (http://www.euclideanspace.com/maths/geometry/rotations/conversions/eulerToQuaternion/index.htm)
     fn from_euler(x: Rad<S>, y: Rad<S>, z: Rad<S>) -> Quaternion<S> {
-        // http://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles#Conversion
-        let (sx2, cx2) = sin_cos(x.mul_s(cast(0.5f64).unwrap()));
-        let (sy2, cy2) = sin_cos(y.mul_s(cast(0.5f64).unwrap()));
-        let (sz2, cz2) = sin_cos(z.mul_s(cast(0.5f64).unwrap()));
+        let (s1, c1) = sin_cos(x.mul_s(cast(0.5f64).unwrap()));
+        let (s2, c2) = sin_cos(y.mul_s(cast(0.5f64).unwrap()));
+        let (s3, c3) = sin_cos(z.mul_s(cast(0.5f64).unwrap()));
 
-        Quaternion::new(cz2 * cx2 * cy2 + sz2 * sx2 * sy2,
-                        sz2 * cx2 * cy2 - cz2 * sx2 * sy2,
-                        cz2 * sx2 * cy2 + sz2 * cx2 * sy2,
-                        cz2 * cx2 * sy2 - sz2 * sx2 * cy2)
+        Quaternion::new(c1 * c2 * c3 - s1 * s2 * s3,
+                        s1 * s2 * c3 + c1 * c2 * s3,
+                        s1 * c2 * c3 + c1 * s2 * s3,
+                        c1 * s2 * c3 - s1 * c2 * s3)
     }
 }

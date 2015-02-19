@@ -26,7 +26,7 @@ use vector::{Vector, Vector2, Vector3};
 
 /// A trait for a generic rotation. A rotation is a transformation that
 /// creates a circular motion, and preserves at least one point in the space.
-pub trait Rotation<S: BaseNum, V: Vector<S>, P: Point<S, V>>: PartialEq + ApproxEq<S> {
+pub trait Rotation<S: BaseNum, V: Vector<S>, P: Point<S, V>>: PartialEq + ApproxEq<S> + Sized {
     /// Create the identity transform (causes no transformation).
     fn identity() -> Self;
 
@@ -63,7 +63,7 @@ pub trait Rotation<S: BaseNum, V: Vector<S>, P: Point<S, V>>: PartialEq + Approx
     /// Modify this rotation in-place by combining it with another.
     #[inline]
     fn concat_self(&mut self, other: &Self) {
-        *self = self.concat(other);
+        *self = Rotation::concat(self, other);
     }
 
     /// Invert this rotation in-place.
@@ -125,7 +125,43 @@ pub trait Rotation3<S: BaseNum>: Rotation<S, Vector3<S>, Point3<S>>
 /// implemented more efficiently than the implementations for `math::Matrix2`. To
 /// enforce orthogonality at the type level the operations have been restricted
 /// to a subset of those implemented on `Matrix2`.
-#[deriving(PartialEq, Clone)]
+///
+/// ## Example
+///
+/// Suppose we want to rotate a vector that lies in the x-y plane by some
+/// angle. We can accomplish this quite easily with a two-dimensional rotation
+/// matrix:
+///
+/// ~~~ignore
+/// use cgmath::rad;
+/// use cgmath::Vector2;
+/// use cgmath::{Matrix, ToMatrix2};
+/// use cgmath::{Rotation, Rotation2, Basis2};
+/// use cgmath::ApproxEq;
+/// use std::f64;
+///
+/// // For simplicity, we will rotate the unit x vector to the unit y vector --
+/// // so the angle is 90 degrees, or π/2.
+/// let unit_x: Vector2<f64> = Vector2::unit_x();
+/// let rot: Basis2<f64> = Rotation2::from_angle(rad(0.5f64 * f64::consts::PI));
+///
+/// // Rotate the vector using the two-dimensional rotation matrix:
+/// let unit_y = rot.rotate_vector(&unit_x);
+///
+/// // Since sin(π/2) may not be exactly zero due to rounding errors, we can
+/// // use cgmath's approx_eq() feature to show that it is close enough.
+/// assert!(unit_y.approx_eq(&Vector2::unit_y()));
+///
+/// // This is exactly equivalent to using the raw matrix itself:
+/// let unit_y2 = rot.to_matrix2().mul_v(&unit_x);
+/// assert_eq!(unit_y2, unit_y);
+///
+/// // Note that we can also concatenate rotations:
+/// let rot_half: Basis2<f64> = Rotation2::from_angle(rad(0.25f64 * f64::consts::PI));
+/// let unit_y3 = rot_half.concat(&rot_half).rotate_vector(&unit_x);
+/// assert!(unit_y3.approx_eq(&unit_y2));
+/// ~~~
+#[derive(PartialEq, Copy, Clone, RustcEncodable, RustcDecodable)]
 pub struct Basis2<S> {
     mat: Matrix2<S>
 }
@@ -152,7 +188,7 @@ impl<S: BaseFloat> ToMatrix2<S> for Basis2<S> {
     fn to_matrix2(&self) -> Matrix2<S> { self.mat.clone() }
 }
 
-impl<S: BaseFloat> Rotation<S, Vector2<S>, Point2<S>> for Basis2<S> {
+impl<S: BaseFloat + 'static> Rotation<S, Vector2<S>, Point2<S>> for Basis2<S> {
     #[inline]
     fn identity() -> Basis2<S> { Basis2{ mat: Matrix2::identity() } }
 
@@ -193,7 +229,7 @@ impl<S: BaseFloat> ApproxEq<S> for Basis2<S> {
     }
 }
 
-impl<S: BaseFloat> Rotation2<S> for Basis2<S> {
+impl<S: BaseFloat + 'static> Rotation2<S> for Basis2<S> {
     fn from_angle(theta: Rad<S>) -> Basis2<S> { Basis2 { mat: Matrix2::from_angle(theta) } }
 }
 
@@ -203,7 +239,7 @@ impl<S: BaseFloat> Rotation2<S> for Basis2<S> {
 /// inversion, can be implemented more efficiently than the implementations for
 /// `math::Matrix3`. To ensure orthogonality is maintained, the operations have
 /// been restricted to a subeset of those implemented on `Matrix3`.
-#[deriving(PartialEq, Clone)]
+#[derive(PartialEq, Copy, Clone, RustcEncodable, RustcDecodable)]
 pub struct Basis3<S> {
     mat: Matrix3<S>
 }
@@ -236,12 +272,12 @@ impl<S: BaseFloat> ToMatrix3<S> for Basis3<S> {
     fn to_matrix3(&self) -> Matrix3<S> { self.mat.clone() }
 }
 
-impl<S: BaseFloat> ToQuaternion<S> for Basis3<S> {
+impl<S: BaseFloat + 'static> ToQuaternion<S> for Basis3<S> {
     #[inline]
     fn to_quaternion(&self) -> Quaternion<S> { self.mat.to_quaternion() }
 }
 
-impl<S: BaseFloat> Rotation<S, Vector3<S>, Point3<S>> for Basis3<S> {
+impl<S: BaseFloat + 'static> Rotation<S, Vector3<S>, Point3<S>> for Basis3<S> {
     #[inline]
     fn identity() -> Basis3<S> { Basis3{ mat: Matrix3::identity() } }
 
@@ -283,7 +319,7 @@ impl<S: BaseFloat> ApproxEq<S> for Basis3<S> {
     }
 }
 
-impl<S: BaseFloat> Rotation3<S> for Basis3<S> {
+impl<S: BaseFloat + 'static> Rotation3<S> for Basis3<S> {
     fn from_axis_angle(axis: &Vector3<S>, angle: Rad<S>) -> Basis3<S> {
         Basis3 { mat: Matrix3::from_axis_angle(axis, angle) }
     }
